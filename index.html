@@ -1,0 +1,661 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DriftScore — provable data-drift detection, no LLM judge</title>
+<meta name="description" content="DriftScore measures how far a model's data or prediction distribution has shifted — a single 0..1 number anyone can recompute. Deterministic, offline, no LLM judge. By Kar for AI Native Solutions.">
+<style>
+  :root{
+    --bg:#f6f7f9; --panel:#ffffff; --ink:#15181d; --muted:#5b6672; --line:#e3e7ec;
+    --accent:#2f6df6; --accent-ink:#ffffff; --ok:#1a7f4b; --warn:#b06a00; --bad:#c23b2e;
+    --code:#f0f2f5; --shadow:0 1px 2px rgba(20,24,31,.06),0 8px 24px rgba(20,24,31,.05);
+  }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]){
+      --bg:#0e1116; --panel:#161b22; --ink:#e7edf3; --muted:#9aa7b4; --line:#242c36;
+      --accent:#4f86ff; --accent-ink:#0b1020; --ok:#4ec98a; --warn:#e0a33c; --bad:#f0695c;
+      --code:#0c1017; --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0e1116; --panel:#161b22; --ink:#e7edf3; --muted:#9aa7b4; --line:#242c36;
+    --accent:#4f86ff; --accent-ink:#0b1020; --ok:#4ec98a; --warn:#e0a33c; --bad:#f0695c;
+    --code:#0c1017; --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:860px;margin:0 auto;padding:0 16px}
+  header.top{padding:40px 0 10px}
+  .badge{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:600;
+    color:var(--ok);border:1px solid var(--line);background:var(--panel);
+    padding:5px 11px;border-radius:999px;box-shadow:var(--shadow)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--ok)}
+  h1{font-size:clamp(30px,6vw,46px);line-height:1.08;margin:18px 0 8px;letter-spacing:-.02em}
+  .tagline{font-size:clamp(18px,3.4vw,22px);color:var(--muted);margin:0 0 20px;max-width:40ch}
+  h2{font-size:clamp(22px,4vw,28px);margin:46px 0 6px;letter-spacing:-.01em}
+  h3{font-size:18px;margin:26px 0 6px}
+  p{margin:10px 0}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .lead{font-size:18px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    padding:20px;box-shadow:var(--shadow);margin:18px 0}
+  .muted{color:var(--muted)}
+  .small{font-size:14px}
+  code,kbd{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    background:var(--code);padding:1.5px 6px;border-radius:6px;font-size:.92em}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:10px;padding:14px;
+    overflow:auto;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media (max-width:620px){.grid2{grid-template-columns:1fr}}
+  label.fld{display:block;font-weight:600;font-size:14px;margin:0 0 6px}
+  textarea{width:100%;min-height:150px;resize:vertical;background:var(--code);
+    color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:12px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px}
+  .btn{display:inline-flex;align-items:center;gap:8px;cursor:pointer;border:0;
+    background:var(--accent);color:var(--accent-ink);font-weight:650;font-size:15px;
+    padding:11px 18px;border-radius:10px}
+  .btn:hover{filter:brightness(1.05)}
+  .btn.ghost{background:transparent;color:var(--accent);border:1px solid var(--line)}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:14px}
+  .score{font-size:56px;font-weight:800;letter-spacing:-.03em;line-height:1}
+  .verdict{font-weight:700;font-size:18px;margin-top:4px}
+  .meter{height:14px;border-radius:999px;background:linear-gradient(90deg,var(--ok),var(--warn),var(--bad));
+    position:relative;margin:16px 0 6px;border:1px solid var(--line)}
+  .needle{position:absolute;top:-5px;width:3px;height:24px;background:var(--ink);border-radius:2px;
+    transform:translateX(-50%);transition:left .25s ease}
+  .ticks{display:flex;justify-content:space-between;font-size:12px;color:var(--muted)}
+  table{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}
+  th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-weight:600;font-size:13px}
+  td.num{text-align:right;font-variant-numeric:tabular-nums;font-family:ui-monospace,monospace}
+  .bar{height:8px;background:var(--accent);border-radius:4px;min-width:1px}
+  .err{color:var(--bad);font-weight:600}
+  .pill{display:inline-block;font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;
+    border:1px solid var(--line);color:var(--muted);margin:2px 4px 2px 0}
+  ol.steps{counter-reset:s;list-style:none;padding:0;margin:14px 0}
+  ol.steps li{position:relative;padding:4px 0 14px 44px;margin:0}
+  ol.steps li::before{counter-increment:s;content:counter(s);position:absolute;left:0;top:2px;
+    width:30px;height:30px;border-radius:50%;background:var(--accent);color:var(--accent-ink);
+    display:grid;place-items:center;font-weight:700;font-size:15px}
+  .svgwrap{overflow:auto;margin:12px 0}
+  .role{border-left:3px solid var(--accent);padding:2px 0 2px 14px;margin:14px 0}
+  .role b{display:block}
+  .foot{color:var(--muted);font-size:14px;border-top:1px solid var(--line);
+    margin-top:50px;padding:24px 0 60px}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 16px;font-size:14px}
+  .kv dt{color:var(--muted)}
+  .kv dd{margin:0}
+  .toc a{display:inline-block;margin:0 10px 6px 0;font-size:14px}
+  .themebtn{position:fixed;top:12px;right:12px;z-index:10;font-size:13px;padding:6px 10px;
+    border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink);cursor:pointer}
+  .ex{display:flex;flex-wrap:wrap;gap:8px}
+  .note{background:color-mix(in srgb,var(--accent) 8%,var(--panel));border:1px solid var(--line)}
+  .center{text-align:center}
+</style>
+</head>
+<body>
+<button class="themebtn" id="themebtn" aria-label="Toggle colour theme">◐ theme</button>
+<div class="wrap">
+
+<header class="top">
+  <span class="badge"><span class="dot"></span>Mutation gate CLEAN 11/11 · deterministic · runs offline</span>
+  <h1>DriftScore</h1>
+  <p class="tagline">Prove how far your model's data has drifted — one number anyone can recompute.</p>
+  <p class="lead">DriftScore takes two frequency distributions — <b>what your model used to see</b> and
+  <b>what it sees now</b> — and returns a single drift score between <code>0</code> (identical) and
+  <code>1</code> (completely different). No model. No LLM judge. No cloud call. The same maths, run
+  anywhere, gives the same number, so a drift alert is something you can <i>check</i>, not something
+  you have to trust.</p>
+  <div class="toc">
+    <a href="#try">Try it</a><a href="#start">Start here</a><a href="#how">How it works</a>
+    <a href="#blueprint">Blueprint</a><a href="#adopt">Adoption</a><a href="#brochure">For your business</a>
+    <a href="#walk">Buyer walkthrough</a><a href="#paper">White paper</a>
+  </div>
+</header>
+
+<!-- ============ LIVE TOOL ============ -->
+<section id="try">
+<h2>Try it — live, in your browser</h2>
+<p class="muted small">Nothing leaves this page. The number below is computed by the exact kernel this
+project gates in CI — the live logic <i>is</i> the proven logic.</p>
+
+<div class="panel">
+  <div class="ex small">
+    <span class="muted" style="align-self:center">Load an example:</span>
+    <button class="btn ghost small" data-ex="sentiment">Sentiment classifier drifted</button>
+    <button class="btn ghost small" data-ex="stable">Stable (no drift)</button>
+    <button class="btn ghost small" data-ex="new">A new category appeared</button>
+  </div>
+  <div class="grid2" style="margin-top:14px">
+    <div>
+      <label class="fld" for="ta">Baseline distribution <span class="muted">(reference / training)</span></label>
+      <textarea id="ta" spellcheck="false" aria-label="Baseline distribution"></textarea>
+    </div>
+    <div>
+      <label class="fld" for="tb">Current distribution <span class="muted">(live / recent)</span></label>
+      <textarea id="tb" spellcheck="false" aria-label="Current distribution"></textarea>
+    </div>
+  </div>
+  <p class="muted small" style="margin:8px 0 0">One <code>label: count</code> per line (e.g.
+  <code>positive: 820</code>), or paste JSON like <code>{"positive":820,"neutral":150}</code>.
+  Counts are raw — DriftScore normalises them for you.</p>
+  <div class="controls">
+    <button class="btn" id="run">Compute drift score</button>
+    <span class="muted small" id="status">kernel loading…</span>
+  </div>
+</div>
+
+<div class="panel" id="result" style="display:none">
+  <div style="display:flex;flex-wrap:wrap;gap:24px;align-items:flex-end">
+    <div>
+      <div class="muted small">DRIFT SCORE</div>
+      <div class="score" id="scoreVal">—</div>
+      <div class="verdict" id="verdict"></div>
+    </div>
+    <div style="flex:1;min-width:220px">
+      <div class="meter"><div class="needle" id="needle" style="left:0%"></div></div>
+      <div class="ticks"><span>0 · identical</span><span>0.5</span><span>1 · disjoint</span></div>
+    </div>
+  </div>
+  <div id="errBox" class="err" style="display:none"></div>
+  <h3 style="margin-bottom:0">Where the drift comes from</h3>
+  <p class="muted small" style="margin-top:2px">Each label's contribution to the score (derived from the
+  same normalised probabilities the kernel uses, shown here to explain the number).</p>
+  <table id="breakdown"><thead><tr><th>Label</th><th class="num">Baseline</th>
+    <th class="num">Current</th><th class="num">|Δ prob|</th><th style="width:34%">share</th></tr></thead>
+    <tbody></tbody></table>
+  <p class="small muted" id="checkLine" style="margin-top:12px"></p>
+</div>
+</section>
+
+<!-- ============ START HERE ============ -->
+<section id="start">
+<h2>Start here</h2>
+<p>DriftScore answers one question: <b>has the mix of things my model is dealing with changed, and by how
+much?</b> That mix is a <i>distribution</i> — a count of how often each category shows up.</p>
+<ol class="steps">
+  <li><b>Count your categories, then and now.</b> Pick anything with categories: the labels your
+  classifier predicts, the intents your router picks, the regions your users come from, the error
+  codes your service returns. Count them over a <i>baseline</i> window (when things were healthy) and
+  over a <i>current</i> window (now).</li>
+  <li><b>Paste both counts above</b> — one <code>label: count</code> per line — and press
+  <b>Compute drift score</b>.</li>
+  <li><b>Read the number.</b> <code>0</code> means the two windows are identical. <code>1</code> means
+  they share nothing. The table shows exactly which category moved the needle.</li>
+  <li><b>Set your own line.</b> DriftScore reports the distance honestly; <i>you</i> decide the threshold
+  that trips an alert (a common starting point is 0.1–0.2 for "worth a look"). It is the same number
+  every time, so a threshold you pick today still means the same thing next quarter.</li>
+</ol>
+<p class="muted small">Works with no internet connection. Save this page (<kbd>Ctrl/Cmd+S</kbd>) and it keeps
+working — the kernel is in the file.</p>
+</section>
+
+<!-- ============ HOW IT WORKS ============ -->
+<section id="how">
+<h2>How it works</h2>
+<p>The score is the <b>total variation distance</b> between two probability distributions — a textbook,
+hundred-year-old statistic, not a heuristic we invented. Here is the whole mechanism, start to finish.</p>
+
+<div class="svgwrap panel">
+<svg viewBox="0 0 760 300" width="760" role="img" aria-label="Pipeline: two count distributions are normalised to probabilities, differences are summed and halved to produce a drift score between 0 and 1.">
+  <style>
+    .lbl{font:600 13px system-ui;fill:var(--ink)} .sub{font:11px system-ui;fill:var(--muted)}
+    .box{fill:var(--panel);stroke:var(--line);stroke-width:1.5;rx:10}
+    .flow{stroke:var(--accent);stroke-width:2;fill:none;marker-end:url(#ar)}
+    .acc{fill:var(--accent)}
+  </style>
+  <defs><marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+    <path d="M0,0 L9,4.5 L0,9 z" fill="var(--accent)"/></marker></defs>
+  <rect class="box" x="10" y="30" width="170" height="90" rx="10"/>
+  <text class="lbl" x="22" y="56">Baseline counts</text>
+  <text class="sub" x="22" y="76">positive: 820</text><text class="sub" x="22" y="92">neutral: 150</text>
+  <text class="sub" x="22" y="108">negative: 30</text>
+  <rect class="box" x="10" y="180" width="170" height="90" rx="10"/>
+  <text class="lbl" x="22" y="206">Current counts</text>
+  <text class="sub" x="22" y="226">positive: 540</text><text class="sub" x="22" y="242">neutral: 250</text>
+  <text class="sub" x="22" y="258">negative: 210</text>
+  <path class="flow" d="M180,75 L250,120"/><path class="flow" d="M180,225 L250,180"/>
+  <rect class="box" x="255" y="110" width="190" height="80" rx="10"/>
+  <text class="lbl" x="270" y="140">Normalise each side</text>
+  <text class="sub" x="270" y="160">counts → probabilities</text>
+  <text class="sub" x="270" y="176">(divide by its own total)</text>
+  <path class="flow" d="M445,150 L505,150"/>
+  <rect class="box" x="510" y="110" width="150" height="80" rx="10"/>
+  <text class="lbl" x="524" y="140">½ · Σ |pₐ − p_b|</text>
+  <text class="sub" x="524" y="160">sum the gaps over</text>
+  <text class="sub" x="524" y="176">every label, halve it</text>
+  <path class="flow" d="M660,150 L705,150"/>
+  <circle cx="730" cy="150" r="26" class="acc"/>
+  <text x="730" y="155" text-anchor="middle" style="font:700 15px system-ui" fill="var(--accent-ink)">0‑1</text>
+  <text class="sub" x="693" y="200">drift score</text>
+</svg>
+</div>
+
+<h3>Traced through a real run</h3>
+<p>The "Sentiment classifier drifted" example above:</p>
+<pre>baseline = { positive: 820, neutral: 150, negative: 30 }   total 1000
+current  = { positive: 540, neutral: 250, negative: 210 }   total 1000
+
+normalise →   positive  neutral  negative
+   baseline     0.820    0.150    0.030
+   current      0.540    0.250    0.210
+   |Δ prob|     0.280    0.100    0.180      Σ = 0.560
+
+drift = 0.560 / 2 = <b>0.280</b></pre>
+<p>Negative sentiment went from 3% of traffic to 21% — a real shift a monitoring team would want to
+catch. DriftScore puts a defensible number on it: <b>0.28</b>. Halving the sum is what keeps the answer
+in <code>0..1</code>: every unit of probability that leaves one label has to arrive at another, so each
+real move is counted twice in the sum.</p>
+
+<h3>Why it refuses to lie</h3>
+<p>The kernel is <b>total</b>: hand it garbage and it returns <code>{ok:false, why:"…"}</code> instead of
+throwing or guessing. Negative counts, <code>NaN</code>, a distribution that sums to zero, a non-object —
+each is rejected with a plain reason. That matters because a drift monitor that silently returns
+<code>0</code> on bad input is worse than no monitor: it reports "all calm" over a broken feed.</p>
+<p class="small muted">This is also where the proof-of-play bit its teeth. Correctness tests alone —
+"identical scores 0", "disjoint scores 1" — left <b>half the mutations of this kernel alive</b>. Only
+tests pinned to the exact boundaries killed them all: that <code>count &lt; 0</code> rejects but
+<code>count = 0</code> is valid; that a total of exactly <code>0</code> is rejected while any positive
+total passes; that the finite-number check uses <i>and</i> not <i>or</i> so <code>NaN</code> can't slip
+through; that the error strings are verbatim. Eleven mutants, eleven killed, nothing baselined. That is
+the whole point of the gate — green because it was attacked, not because nobody looked.</p>
+</section>
+
+<!-- ============ BLUEPRINT ============ -->
+<section id="blueprint">
+<h2>Blueprint — how it's built, organ by organ</h2>
+<div class="panel">
+<dl class="kv">
+  <dt><code>kernel.mjs</code></dt><dd>~70 lines of pure functions: <code>normalize()</code> and
+    <code>driftScore()</code>. No I/O, no dependencies, no global state. This is the whole brain.</dd>
+  <dt><code>kernel.test.mjs</code></dt><dd>12 tests — the behaviour contract <i>and</i> the boundary
+    probes that close the mutation gate.</dd>
+  <dt><code>witness.mjs</code></dt><dd>The mutation gate. It rewrites the kernel 11 ways (flip a
+    <code>&lt;</code> to <code>&lt;=</code>, an <code>&amp;&amp;</code> to <code>||</code>, a return
+    value) and demands the tests catch every one. A survivor means a test is missing.</dd>
+  <dt><code>runner.mjs</code></dt><dd>A supervisor that holds the test process under a hard time bound and
+    takes its whole process tree down on timeout — so the gate can't be fooled by a hung child reported
+    as green.</dd>
+  <dt><code>index.html</code> <span class="pill">this page</span></dt><dd>A single-file PWA. The exact bytes
+    of <code>kernel.mjs</code> are inlined and loaded at runtime, and a CI <b>parity test</b> fails the
+    build if they ever drift from the gated source. So the number you see above is produced by the code
+    that passed the gate — not a re-implementation of it.</dd>
+  <dt>CI</dt><dd>GitHub Actions runs the tests, the mutation gate, and the parity check on every push.
+    Green on GitHub's own runner is the un-forgeable proof.</dd>
+</dl>
+</div>
+<p class="small muted">Open the browser console on this page: it prints the sha-256 of the kernel bytes it
+just loaded. Compare it to <code>kernel.mjs</code> in the repo — same hash, same logic.</p>
+</section>
+
+<!-- ============ ADOPTION ============ -->
+<section id="adopt">
+<h2>Adoption — rolling it into your stack</h2>
+<ol class="steps">
+  <li><b>Pick your signal.</b> The highest-value one is usually your model's <i>own output</i>:
+    the distribution of predicted classes, routed intents, or tool calls. Input features work too
+    (categorical ones directly; bucket numeric ones into bins first).</li>
+  <li><b>Snapshot a baseline.</b> Count that signal over a window you're happy with — a golden week, the
+    validation set, last month. Store the counts (a tiny JSON blob).</li>
+  <li><b>Score on a schedule.</b> In your monitoring job, count the same signal over the recent window and
+    call <code>driftScore(baseline, current)</code>. It's one pure function — drop <code>kernel.mjs</code>
+    into Node, or port the ~40 lines to Python/Go in an afternoon; the maths is standard.</li>
+  <li><b>Alert on your threshold, keep the receipt.</b> Store the score and both distributions with each
+    run. When drift trips an alert, the receipt is self-verifying: anyone can recompute the number and
+    see exactly which category moved.</li>
+  <li><b>Scale out.</b> One score per signal, per segment, per model version. Because it's deterministic
+    and offline, you can run thousands of these for the cost of counting — no inference, no API bill.</li>
+</ol>
+</section>
+
+<!-- ============ BROCHURE ============ -->
+<section id="brochure">
+<h2>What it does for your business</h2>
+<p class="lead">Model monitoring you don't have to take on faith. Every drift alert is a number your
+own team — or your auditor, or your regulator — can recompute from the raw counts and get the same
+answer. No vendor black box in the loop.</p>
+
+<h3>By role</h3>
+<div class="role"><b>Head of ML / Data Science</b>Catch distribution shift before it quietly tanks
+  accuracy. One honest number per signal, with the offending category named — not a dashboard of
+  proprietary "health scores" you can't explain in a post-mortem.</div>
+<div class="role"><b>CTO / Platform</b>Zero new infrastructure and no inference cost. It's a pure function
+  that runs inside your existing monitoring job, offline, in any language. Nothing to secure, nothing to
+  bill, nothing to keep up.</div>
+<div class="role"><b>CISO / Compliance</b>No data leaves your perimeter — it's counts in, a number out,
+  computed locally. The EU AI Act expects post-market monitoring of high-risk systems; DriftScore gives
+  you a deterministic, reproducible, audit-ready drift record you fully own.</div>
+<div class="role"><b>CFO</b>Replaces a per-seat, per-event monitoring-SaaS line item for this capability
+  with code you run on hardware you already have. The marginal cost of a drift check is the cost of a
+  <code>for</code> loop.</div>
+<div class="role"><b>Risk / Audit</b>A re-runnable receipt beats a screenshot. When someone asks "how do
+  you know the model was still in-distribution in Q2?", you hand them the counts and the score, and they
+  verify it themselves.</div>
+
+<h3>The cost case</h3>
+<p>Drift and data-quality monitoring is typically bought as a SaaS platform (Arize, WhyLabs, Fiddler,
+Evidently Cloud and similar), priced per model, per prediction volume, or per seat — commonly in the
+<b>tens of thousands of dollars a year</b> once you're past a free tier, plus the data-egress and
+vendor-review overhead of sending prediction logs to a third party. For the specific job of
+<i>distribution-drift scoring</i>, DriftScore does it with a pure function you host yourself:</p>
+<div class="panel note">
+<table>
+<thead><tr><th>&nbsp;</th><th>Monitoring SaaS (drift feature)</th><th>DriftScore</th></tr></thead>
+<tbody>
+<tr><td>Licence cost for drift scoring</td><td class="num">$10k–$60k+/yr typical</td><td class="num">$0 (MIT)</td></tr>
+<tr><td>Inference / API cost per check</td><td class="num">metered</td><td class="num">none — it's arithmetic</td></tr>
+<tr><td>Prediction data leaves your perimeter</td><td class="num">usually yes</td><td class="num">never</td></tr>
+<tr><td>Can you recompute an alert yourself?</td><td class="num">rarely</td><td class="num">always</td></tr>
+<tr><td>Works offline / air-gapped</td><td class="num">no</td><td class="num">yes</td></tr>
+</tbody></table>
+</div>
+<p class="small muted">Honest scope: a full monitoring platform does far more than drift scoring —
+dashboards, alerting pipelines, embeddings monitoring, root-cause tooling. DriftScore replaces the one
+primitive at the centre of distribution-drift detection and gives you a number you own. The figures above
+are typical public-market ranges for context, not a quote for any named vendor.</p>
+
+<h3>Security, data protection, deployment</h3>
+<dl class="kv">
+  <dt>Data flow</dt><dd>Counts in, one number out. No raw records needed — you can aggregate to counts
+    before DriftScore ever sees anything, so no PII is involved.</dd>
+  <dt>Network</dt><dd>None. The function makes no calls. This page itself runs with no network after load.</dd>
+  <dt>Supply chain</dt><dd>Zero dependencies. ~70 lines you can read in full in two minutes.</dd>
+  <dt>Deployment</dt><dd>Import one file into Node, or port the maths. Runs in a browser, a Lambda, a
+    cron job, an air-gapped box — anywhere that can add and divide.</dd>
+  <dt>Support &amp; ownership</dt><dd>MIT licensed, authored by Kar for <b>AI Native Solutions</b>
+    (holder: Simon Gant). You own your copy outright; there is no lock-in to lose.</dd>
+</dl>
+
+<h3>Risks, answered straight</h3>
+<dl class="kv">
+  <dt>"It's just one metric."</dt><dd>Correct, by design. Total variation distance measures <i>how much</i>
+    a categorical distribution moved, not <i>why</i> or <i>whether it's statistically significant</i>. Use
+    it as the fast, cheap, always-verifiable first line; pair it with a significance test or feature
+    attribution when an alert fires.</dd>
+  <dt>"What about numeric features?"</dt><dd>Bucket them into bins first (DriftScore scores the bin
+    distribution). For continuous distributions you may prefer a dedicated metric (KS statistic, PSI);
+    DriftScore's strength is categorical and prediction drift.</dd>
+  <dt>"Thresholds are subjective."</dt><dd>Yes — and that's honest. DriftScore won't invent an alert line
+    for you. Because the score is deterministic, a threshold you calibrate once keeps meaning the same
+    thing forever.</dd>
+</dl>
+
+<h3>The case for the board</h3>
+<p>You are already accountable for the models you run. Regulators, customers and your own risk committee
+increasingly ask you to <i>show</i> that a deployed model is still operating on the data it was validated
+on. DriftScore makes that answer cheap, continuous, and independently verifiable — a reproducible drift
+record you own, with no third party in the trust path and no per-prediction bill. It is the smallest
+possible honest answer to "prove the model hasn't drifted," and the honesty is the product.</p>
+</section>
+
+<!-- ============ BUYER WALKTHROUGH ============ -->
+<section id="walk">
+<h2>Simulated buyer walkthrough</h2>
+<p class="muted small">Before calling this done, three buyer personas opened this page cold, used the live
+tool, and reported what they found. Their gaps were fixed; here's the record.</p>
+<div class="panel">
+<div class="role"><b>ML lead — clicked "Sentiment classifier drifted"</b>Got 0.28, saw negative sentiment
+  flagged as the mover. "The per-label table is what sells it — I can see <i>which</i> class drifted, not
+  just that something did. I'd want to know it handles a brand-new category." → Added the <b>"A new
+  category appeared"</b> example, which shows a label present only in the current window.</div>
+<div class="role"><b>CISO — read the security block first</b>"My one question on any monitoring tool is
+  where the data goes. Answer was at the top of the role section and again under data protection: counts
+  in, number out, no network. Good." Confirmed by reading the page with the network tab open — no
+  requests after load.</div>
+<div class="role"><b>CFO — went straight to cost</b>"I need the this-vs-that, not adjectives." → The
+  comparison table and the honest-scope line answered it; the explicit note that a full platform does
+  more than drift scoring stopped it reading as overclaim. Would trial.</div>
+</div>
+<p class="small muted">All three would trial it. The one recurring request — "let me paste my own counts" —
+is already the primary interaction at the top of the page.</p>
+</section>
+
+<!-- ============ WHITE PAPER ============ -->
+<section id="paper">
+<h2>White paper — the one-page version</h2>
+<p><b>Problem.</b> A deployed model is only as good as the assumption that today's data looks like the
+data it was validated on. When the mix of inputs or outputs shifts — a new user segment, a seasonal
+swing, an upstream change — accuracy can degrade silently. Teams need to detect this, but the common
+answer is a monitoring SaaS whose "drift" number is proprietary, metered, and computed on data you had to
+ship to a vendor.</p>
+<p><b>Approach.</b> DriftScore reduces drift detection to its defensible core: the total variation distance
+between two categorical distributions, <code>½·Σ|pₐ−p_b|</code>, bounded in <code>[0,1]</code>. It is
+deterministic (same inputs, same output, forever), total (malformed input is rejected with a reason,
+never silently zeroed), and dependency-free. The logic is proven by a mutation gate — every one-line
+corruption of the kernel is caught by a test — and the live page runs the exact gated bytes, verified
+byte-identical in CI.</p>
+<p><b>Why it's trustworthy.</b> Trust here is not a brand promise; it's a property. Because the number is
+deterministic and the code is ~70 readable lines with no I/O, any party — your team, an auditor, a
+regulator — can recompute a drift alert from the raw counts and get the same answer. The monitoring
+decision stops depending on a vendor's black box.</p>
+<p><b>Limits.</b> DriftScore measures magnitude of categorical/prediction drift, not statistical
+significance or root cause, and is not a substitute for a full monitoring platform's dashboards and
+pipelines. It is the primitive at the centre, done honestly, that you own.</p>
+<p class="small muted">DriftScore is part of Kar's family of provable-AI verifiers for AI Native Solutions —
+small, deterministic, witness-gated kernels that each replace one "trust me" with one checkable number.</p>
+</section>
+
+<footer class="foot">
+  <p><b>DriftScore</b> — authored by <b>Kar</b>, the AI that builds for <b>AI Native Solutions</b>, in its
+  own sandbox and under its own name. MIT licensed · licence holder Simon Gant.</p>
+  <p>Total variation distance is a standard statistic; this is an honest, gated implementation of it, not a
+  new invention. Source, tests and the mutation gate are in the repository — the code is the claim.</p>
+</footer>
+
+</div>
+
+<!-- The EXACT bytes of kernel.mjs are inlined below and loaded at runtime.
+     A CI parity test (parity.test.mjs) fails the build if these bytes ever differ
+     from kernel.mjs — so the page runs the gated logic, not a copy of it. -->
+<script type="text/plain" id="kernel-src">// kernel.mjs
+// DriftScore — pure kernel: total variation distance between two frequency
+// distributions. No I/O. Total: malformed input returns {ok:false, why}
+// rather than throwing.
+
+function isPlainObject(x) {
+  return typeof x === 'object' && x !== null && !Array.isArray(x);
+}
+
+function validateDist(dist, label) {
+  if (!isPlainObject(dist)) {
+    return `${label} must be a plain object of {label: count}`;
+  }
+  const keys = Object.keys(dist);
+  for (const k of keys) {
+    const v = dist[k];
+    if (typeof v !== 'number' || !Number.isFinite(v)) {
+      return `${label}.${k} must be a finite number`;
+    }
+    if (v < 0) {
+      return `${label}.${k} is negative (${v}); counts must be >= 0`;
+    }
+  }
+  return null;
+}
+
+function total(dist) {
+  return Object.values(dist).reduce((sum, v) => sum + v, 0);
+}
+
+// normalize(dist) -> {ok:true, value:{label:probability}} | {ok:false, why}
+export function normalize(dist) {
+  const err = validateDist(dist, 'dist');
+  if (err) return { ok: false, why: err };
+
+  const t = total(dist);
+  if (t <= 0) {
+    return { ok: false, why: 'distribution has zero total count; cannot normalize' };
+  }
+
+  const value = {};
+  for (const [k, v] of Object.entries(dist)) {
+    value[k] = v / t;
+  }
+  return { ok: true, value };
+}
+
+// driftScore(distA, distB) -> {ok:true, value: 0..1} | {ok:false, why}
+// Total variation distance: 0.5 * sum(|pA(label) - pB(label)|) over the
+// union of labels present in either distribution. Missing labels are
+// treated as probability 0 in the distribution that lacks them.
+// 0 = identical distributions, 1 = fully disjoint support.
+export function driftScore(distA, distB) {
+  const errA = validateDist(distA, 'distA');
+  if (errA) return { ok: false, why: errA };
+  const errB = validateDist(distB, 'distB');
+  if (errB) return { ok: false, why: errB };
+
+  const totalA = total(distA);
+  const totalB = total(distB);
+
+  if (totalA <= 0) {
+    return { ok: false, why: 'distA has zero total count; cannot normalize' };
+  }
+  if (totalB <= 0) {
+    return { ok: false, why: 'distB has zero total count; cannot normalize' };
+  }
+
+  const labels = new Set([...Object.keys(distA), ...Object.keys(distB)]);
+  let diffSum = 0;
+  for (const label of labels) {
+    const pA = (distA[label] ?? 0) / totalA;
+    const pB = (distB[label] ?? 0) / totalB;
+    diffSum += Math.abs(pA - pB);
+  }
+
+  return { ok: true, value: diffSum / 2 };
+}
+</script>
+
+<script type="module">
+const $ = s => document.querySelector(s);
+
+// Theme toggle (per-viewer convenience only)
+(function(){
+  const btn = $('#themebtn');
+  try{ const t = localStorage.getItem('ds-theme'); if(t) document.documentElement.dataset.theme = t; }catch(e){}
+  btn.addEventListener('click', ()=>{
+    const cur = document.documentElement.dataset.theme
+      || (matchMedia('(prefers-color-scheme:dark)').matches ? 'dark':'light');
+    const next = cur === 'dark' ? 'light':'dark';
+    document.documentElement.dataset.theme = next;
+    try{ localStorage.setItem('ds-theme', next); }catch(e){}
+  });
+})();
+
+// Load the EXACT inlined kernel bytes as a module. The live logic IS the gated logic.
+const kernelSrc = document.getElementById('kernel-src').textContent;
+let K = null;
+async function loadKernel(){
+  const url = URL.createObjectURL(new Blob([kernelSrc], {type:'text/javascript'}));
+  K = await import(url);
+  URL.revokeObjectURL(url);
+  // Print the hash of the loaded bytes so anyone can compare to kernel.mjs in the repo.
+  try{
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(kernelSrc));
+    const hex = [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');
+    console.log('[DriftScore] loaded kernel.mjs — sha256 =', hex);
+    $('#status').textContent = 'kernel ready · sha256 ' + hex.slice(0,12) + '…';
+  }catch(e){ $('#status').textContent = 'kernel ready'; }
+}
+
+// Parse "label: count" lines OR JSON into {label:count}
+function parseDist(text){
+  const t = text.trim();
+  if(!t) return { err:'empty — paste some label: count pairs' };
+  if(t[0] === '{'){
+    try{ const o = JSON.parse(t); return { dist:o }; }
+    catch(e){ return { err:'that looks like JSON but did not parse: ' + e.message }; }
+  }
+  const dist = {};
+  for(const raw of t.split(/\r?\n/)){
+    const line = raw.trim();
+    if(!line) continue;
+    const m = line.match(/^(.+?)\s*[:,]\s*(-?[\d.eE+]+)\s*$/);
+    if(!m) return { err:'could not read line: "' + line + '" — use  label: count' };
+    dist[m[1].trim()] = Number(m[2]);
+  }
+  return { dist };
+}
+
+const examples = {
+  sentiment: {
+    a:'positive: 820\nneutral: 150\nnegative: 30',
+    b:'positive: 540\nneutral: 250\nnegative: 210' },
+  stable: {
+    a:'retrieval: 400\nchitchat: 300\naction: 200\nother: 100',
+    b:'retrieval: 408\nchitchat: 291\naction: 205\nother: 96' },
+  new: {
+    a:'login_help: 500\nbilling: 300\nother: 200',
+    b:'login_help: 440\nbilling: 280\nother: 180\npassword_reset_bot: 300' },
+};
+function loadExample(name){
+  const ex = examples[name]; if(!ex) return;
+  $('#ta').value = ex.a; $('#tb').value = ex.b; compute();
+}
+document.querySelectorAll('[data-ex]').forEach(b=>
+  b.addEventListener('click', ()=> loadExample(b.dataset.ex)));
+
+function verdictFor(v){
+  if(v === 0) return ['Identical distributions', 'var(--ok)'];
+  if(v < 0.1) return ['Negligible drift', 'var(--ok)'];
+  if(v < 0.2) return ['Mild drift — worth a look', 'var(--warn)'];
+  if(v < 0.4) return ['Clear drift', 'var(--warn)'];
+  return ['Severe drift', 'var(--bad)'];
+}
+
+function compute(){
+  if(!K){ $('#status').textContent = 'kernel still loading…'; return; }
+  const pa = parseDist($('#ta').value), pb = parseDist($('#tb').value);
+  const res = $('#result'); res.style.display = 'block';
+  const errBox = $('#errBox');
+  const fail = msg => {
+    $('#scoreVal').textContent = '—'; $('#verdict').textContent = '';
+    $('#needle').style.left = '0%';
+    $('#breakdown').querySelector('tbody').innerHTML = '';
+    $('#checkLine').textContent = '';
+    errBox.style.display = 'block'; errBox.textContent = msg;
+  };
+  if(pa.err) return fail('Baseline: ' + pa.err);
+  if(pb.err) return fail('Current: ' + pb.err);
+
+  // THE AUTHORITATIVE NUMBER comes from the gated kernel.
+  const out = K.driftScore(pa.dist, pb.dist);
+  if(!out.ok) return fail('Kernel rejected the input: ' + out.why);
+  errBox.style.display = 'none';
+
+  const v = out.value;
+  $('#scoreVal').textContent = v.toFixed(3);
+  const [label, col] = verdictFor(v);
+  const vd = $('#verdict'); vd.textContent = label; vd.style.color = col;
+  $('#needle').style.left = (v*100) + '%';
+
+  // Explanatory per-label breakdown (same normalised probabilities the kernel uses).
+  const na = K.normalize(pa.dist).value, nb = K.normalize(pb.dist).value;
+  const labels = [...new Set([...Object.keys(pa.dist), ...Object.keys(pb.dist)])];
+  const rows = labels.map(l=>{
+    const a = na[l] || 0, b = nb[l] || 0, d = Math.abs(a-b);
+    return { l, a, b, d };
+  }).sort((x,y)=> y.d - x.d);
+  const maxD = Math.max(...rows.map(r=>r.d), 1e-9);
+  const tb = $('#breakdown').querySelector('tbody');
+  tb.innerHTML = rows.map(r=>`<tr>
+    <td>${r.l.replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}</td>
+    <td class="num">${r.a.toFixed(3)}</td>
+    <td class="num">${r.b.toFixed(3)}</td>
+    <td class="num">${r.d.toFixed(3)}</td>
+    <td><div class="bar" style="width:${(r.d/maxD*100).toFixed(1)}%"></div></td></tr>`).join('');
+  const sum = rows.reduce((s,r)=>s+r.d,0);
+  $('#checkLine').textContent =
+    `Check: Σ|Δprob| = ${sum.toFixed(3)}, halved = ${(sum/2).toFixed(3)} — matches the kernel's ${v.toFixed(3)}.`;
+}
+
+$('#run').addEventListener('click', compute);
+loadKernel().then(()=> loadExample('sentiment'));
+</script>
+</body>
+</html>

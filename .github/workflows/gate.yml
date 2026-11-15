@@ -8,7 +8,11 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '22' }
       - name: tests
-        run: node --test kernel.test.mjs
+        run: node --test kernel.test.mjs parity.test.mjs
+      - name: live page is byte-identical to the gated kernel
+        run: |
+          node build-page.mjs
+          git diff --exit-code -- index.html || (echo "index.html is out of sync with kernel.mjs — run 'node build-page.mjs' and commit"; exit 1)
       - name: witness must be CLEAN
         run: |
           node witness.mjs mutate kernel.mjs --timeout 30000 --cap 600 --test node --test kernel.test.mjs | tee gate.out || true
