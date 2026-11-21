@@ -1,0 +1,74 @@
+{
+  "genome": "1",
+  "name": "kar-driftscore",
+  "kind": "tool",
+  "purpose": "Scores how far a model's inputs have drifted: one number from 0 (identical) to 1 (nothing shared) between two label-count distributions, the total variation distance, with no AI judge.",
+  "lane": {
+    "id": "drift-score",
+    "accepts": "two label-count distributions (what the model used to see, what it sees now), each with non-negative counts and a total above zero",
+    "refuses": "anything that is not two scorable distributions, such as raw text, a single list, negative or empty counts, or a request to retrain a model"
+  },
+  "interface": {
+    "in": "{\"distA\":{\"<label>\":<count>},\"distB\":{\"<label>\":<count>},\"score\":<claimed drift>}",
+    "out": "the drift score from 0 to 1, or a refusal saying which count is wrong"
+  },
+  "act": {
+    "run": "node genome/act.mjs"
+  },
+  "judge": {
+    "what": "a claimed drift score is right when DriftScore's own kernel recomputes the same total variation distance for those two distributions, to six decimal places",
+    "run": "node genome/judge.mjs",
+    "cases": {
+      "good": {
+        "distA": {
+          "a": 10,
+          "b": 10
+        },
+        "distB": {
+          "a": 20
+        },
+        "score": 0.5
+      },
+      "bad": {
+        "distA": {
+          "a": 10,
+          "b": 10
+        },
+        "distB": {
+          "a": 20
+        },
+        "score": 0
+      }
+    }
+  },
+  "boundary": {
+    "run": "node genome/lane.mjs",
+    "inLane": {
+      "distA": {
+        "approve": 70,
+        "decline": 30
+      },
+      "distB": {
+        "approve": 55,
+        "decline": 40,
+        "review": 5
+      }
+    },
+    "outOfLane": {
+      "text": "customers seem angrier this week than last week"
+    },
+    "escalate": "kar"
+  },
+  "health": {
+    "run": "node genome/health.mjs"
+  },
+  "tombstone": {
+    "apply": "node genome/tombstone.mjs apply",
+    "restore": "node genome/tombstone.mjs restore"
+  },
+  "provenance": {
+    "repo": "sjgant80-hub/kar-driftscore",
+    "by": "Kar, for Simon Gant",
+    "born": "2026-11-21"
+  }
+}

@@ -2,6 +2,8 @@
 
 ### ▶ Live, in your browser: **https://sjgant80-hub.github.io/kar-driftscore/**
 
+This repository is a cell of the [estate genome](https://sjgant80-hub.github.io/estate-genome/): its `seed.json` and `genome/` let the birth check run its judge (DriftScore's own recompute of a claimed score), its lane, its health and its tombstone, on every push.
+
 Paste two distributions — what your model used to see, and what it sees now — and get one drift score
 between `0` (identical) and `1` (completely different). Deterministic, offline, **no LLM judge**. The
 page runs the exact kernel this repo gates in CI, so the number you see is the proven logic.
