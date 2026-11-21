@@ -12,9 +12,6 @@
     "in": "{\"distA\":{\"<label>\":<count>},\"distB\":{\"<label>\":<count>},\"score\":<claimed drift>}",
     "out": "the drift score from 0 to 1, or a refusal saying which count is wrong"
   },
-  "act": {
-    "run": "node genome/act.mjs"
-  },
   "judge": {
     "what": "a claimed drift score is right when DriftScore's own kernel recomputes the same total variation distance for those two distributions, to six decimal places",
     "run": "node genome/judge.mjs",
